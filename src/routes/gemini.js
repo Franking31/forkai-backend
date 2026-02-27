@@ -37,11 +37,11 @@ router.post('/chat', authMiddleware, async (req, res) => {
 
 // POST /api/ai/generate-recipe
 router.post('/generate-recipe', authMiddleware, async (req, res) => {
-  const { query } = req.body;
+  const { query, servings = 4 } = req.body;
   if (!query) return res.status(400).json({ error: 'Query requise' });
-  const systemPrompt = `Tu es un chef cuisinier expert. Génère une recette en lien avec la demande.
+  const systemPrompt = `Tu es un chef cuisinier expert. Génère une recette pour ${servings} personnes.
 Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans commentaire:
-{"id":"gen_${Date.now()}","title":"Nom","category":"🍽️ Catégorie","imageUrl":null,"durationMinutes":30,"servings":4,"description":"Description.","ingredients":["200g de ..."],"steps":["Étape 1."]}`;
+{"id":"gen_${Date.now()}","title":"Nom","category":"🍽️ Catégorie","imageUrl":null,"durationMinutes":30,"servings":${servings},"description":"Description.","ingredients":["200g de ..."],"steps":["Étape 1."]}`;
   try {
     const text = await callGroq(systemPrompt, [{ content: query, isUser: true }]);
     const clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -63,3 +63,30 @@ router.get('/stats', authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
+
+// POST /api/ai/generate-recipe-list — 10 recettes
+router.post('/generate-recipe-list', authMiddleware, async (req, res) => {
+  const { query, servings = 4 } = req.body;
+  if (!query) return res.status(400).json({ error: 'Query requise' });
+
+  const systemPrompt = `Tu es un chef cuisinier expert. Génère exactement 10 recettes variées en lien avec la demande.
+Réponds UNIQUEMENT avec un tableau JSON valide, sans markdown, sans commentaire, sans texte avant ou après.
+Chaque recette doit avoir cette structure exacte :
+{"id":"gen_${Date.now()}_INDEX","title":"Nom","category":"🍽️ Catégorie","imageUrl":null,"durationMinutes":30,"servings":${servings},"description":"Description courte.","ingredients":["200g de ..."],"steps":["Étape 1."]}
+Retourne un tableau de 10 objets : [recette1, recette2, ..., recette10]
+Les recettes doivent être VARIÉES (différents pays, styles, ingrédients principaux).`;
+
+  try {
+    const text = await callGroq(systemPrompt, [{ content: `Génère 10 recettes variées pour : ${query}`, isUser: true }]);
+    const clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    // Extraire le tableau JSON
+    const match = clean.match(/\[[\s\S]*\]/);
+    if (!match) throw new Error('Format JSON invalide');
+    const recipes = JSON.parse(match[0]);
+    // Assigner des IDs uniques
+    recipes.forEach((r, i) => { r.id = `gen_${Date.now()}_${i}`; });
+    res.json({ recipes });
+  } catch (e) {
+    res.status(500).json({ error: 'Erreur: ' + e.message });
+  }
+});
