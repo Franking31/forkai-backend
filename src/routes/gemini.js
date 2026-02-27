@@ -15,7 +15,7 @@ async function callGroq(systemPrompt, messages) {
   const res = await fetch(GROQ_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
-    body: JSON.stringify({ model: GROQ_MODEL, messages: formatted, max_tokens: 2048, temperature: 0.8 }),
+    body: JSON.stringify({ model: GROQ_MODEL, messages: formatted, max_tokens: 8000, temperature: 0.7 }),
   });
   if (!res.ok) throw new Error(`Groq error ${res.status}: ${await res.text()}`);
   const data = await res.json();
@@ -107,9 +107,15 @@ router.post('/chat', authMiddleware, async (req, res) => {
 router.post('/generate-recipe', authMiddleware, async (req, res) => {
   const { query, servings = 4 } = req.body;
   if (!query) return res.status(400).json({ error: 'Query requise' });
-  const systemPrompt = `Tu es un chef cuisinier expert. Génère une recette pour ${servings} personnes.
-Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans commentaire:
-{"id":"gen_${Date.now()}","title":"Nom","category":"🍽️ Catégorie","imageUrl":null,"durationMinutes":30,"servings":${servings},"description":"Description.","ingredients":["200g de ..."],"steps":["Étape 1."]}`;
+  const systemPrompt = `Tu es un chef cuisinier expert. Génère une recette COMPLÈTE et DÉTAILLÉE pour ${servings} personnes.
+RÈGLES IMPORTANTES :
+- Minimum 6 ingrédients avec quantités précises (ex: "250g de farine", "3 œufs", "1 cuillère à soupe d'huile d'olive")
+- Minimum 5 étapes de préparation détaillées (chaque étape explique clairement comment faire)
+- La description doit être appétissante et précise (2-3 phrases)
+- durationMinutes doit être réaliste pour la recette
+
+Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans texte avant ou après :
+{"id":"ID","title":"Nom complet du plat","category":"🍽️ Catégorie","imageUrl":null,"durationMinutes":30,"servings":${servings},"description":"Description appétissante de la recette.","ingredients":["250g de farine","3 œufs entiers","200ml de lait entier","50g de beurre fondu","1 pincée de sel","2 cuillères à soupe de sucre"],"steps":["Étape 1 détaillée : comment faire exactement.","Étape 2 détaillée : comment faire exactement.","Étape 3 détaillée.","Étape 4 détaillée.","Étape 5 : présentation et service."]}`;
   try {
     const text = await callGroq(systemPrompt, [{ content: query, isUser: true }]);
     const clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -191,15 +197,37 @@ router.post('/generate-recipe-list', authMiddleware, async (req, res) => {
   const { query, servings = 4 } = req.body;
   if (!query) return res.status(400).json({ error: 'Query requise' });
 
-  const systemPrompt = `Tu es un chef cuisinier expert. Génère exactement 10 recettes variées en lien avec la demande.
-Réponds UNIQUEMENT avec un tableau JSON valide, sans markdown, sans commentaire, sans texte avant ou après.
-Chaque recette doit avoir cette structure exacte :
-{"id":"gen_${Date.now()}_INDEX","title":"Nom","category":"🍽️ Catégorie","imageUrl":null,"durationMinutes":30,"servings":${servings},"description":"Description courte.","ingredients":["200g de ..."],"steps":["Étape 1."]}
-Retourne un tableau de 10 objets : [recette1, recette2, ..., recette10]
-Les recettes doivent être VARIÉES (différents pays, styles, ingrédients principaux).`;
+  const systemPrompt = `Tu es un chef cuisinier expert. Génère exactement 10 recettes COMPLÈTES et VARIÉES.
+
+RÈGLES OBLIGATOIRES pour CHAQUE recette :
+- "ingredients" : MINIMUM 6 ingrédients avec quantités précises (ex: "300g de poulet", "2 gousses d'ail", "1 cuillère à café de cumin")
+- "steps" : MINIMUM 5 étapes détaillées qui expliquent vraiment comment cuisiner le plat
+- "description" : 1-2 phrases appétissantes et précises
+- "durationMinutes" : durée réaliste en minutes (nombre entier)
+- "servings" : ${servings} (nombre entier)
+- Les 10 recettes doivent être DIFFÉRENTES (pays, style, ingrédients principaux variés)
+
+Format JSON strict — réponds UNIQUEMENT avec ce tableau, sans markdown ni texte autour :
+[
+  {"id":"1","title":"Nom du plat","category":"🍽️ Catégorie","imageUrl":null,"durationMinutes":30,"servings":${servings},"description":"Description appétissante.","ingredients":["300g de ...","2 gousses d'ail","1 oignon","200ml de ...","sel et poivre","huile d'olive"],"steps":["Préparer les ingrédients : ...","Faire revenir ... pendant ... minutes.","Ajouter ... et mélanger.","Laisser mijoter ... minutes.","Dresser et servir chaud."]},
+  ... 9 autres recettes complètes ...
+]`;
 
   try {
-    const text = await callGroq(systemPrompt, [{ content: `Génère 10 recettes variées pour : ${query}`, isUser: true }]);
+    // Appel direct avec plus de tokens pour 10 recettes complètes
+    const fetch2 = (await import('node-fetch')).default;
+    const listMessages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `Génère 10 recettes complètes et variées pour : ${query}. Chaque recette DOIT avoir au moins 6 ingrédients et 5 étapes détaillées.` }
+    ];
+    const listRes = await fetch2(GROQ_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+      body: JSON.stringify({ model: GROQ_MODEL, messages: listMessages, max_tokens: 8000, temperature: 0.7 }),
+    });
+    if (!listRes.ok) throw new Error(`Groq error ${listRes.status}`);
+    const listData = await listRes.json();
+    const text = listData.choices[0].message.content;
     const clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     // Extraire le tableau JSON
     const match = clean.match(/\[[\s\S]*\]/);
