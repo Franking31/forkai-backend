@@ -22,6 +22,69 @@ async function callGroq(systemPrompt, messages) {
   return data.choices[0].message.content;
 }
 
+// ── Recherche d'image via Unsplash ────────────
+async function fetchFoodImage(title) {
+  const fetch = (await import('node-fetch')).default;
+  
+  // Nettoyer le titre : enlever emojis, traduire si besoin
+  const query = title
+    .replace(/[\u{1F300}-\u{1FFFF}]/gu, '')
+    .replace(/[🍽️🍴]/g, '')
+    .trim();
+
+  // 1. Essayer Unsplash (nécessite UNSPLASH_ACCESS_KEY dans les variables Render)
+  if (process.env.UNSPLASH_ACCESS_KEY) {
+    try {
+      const url = `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query + ' food dish')}&per_page=1&orientation=landscape&client_id=${process.env.UNSPLASH_ACCESS_KEY}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+          return data.results[0].urls.regular + '&w=600&q=80';
+        }
+      }
+    } catch (e) {
+      console.log('Unsplash error:', e.message);
+    }
+  }
+
+  // 2. Fallback : Pexels (nécessite PEXELS_API_KEY)
+  if (process.env.PEXELS_API_KEY) {
+    try {
+      const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(query + ' food')}&per_page=1&orientation=landscape`;
+      const res = await fetch(url, {
+        headers: { 'Authorization': process.env.PEXELS_API_KEY },
+        signal: AbortSignal.timeout(5000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.photos && data.photos.length > 0) {
+          return data.photos[0].src.large;
+        }
+      }
+    } catch (e) {
+      console.log('Pexels error:', e.message);
+    }
+  }
+
+  // 3. Fallback statique : Unsplash source (pas de clé, mais deprecated)
+  try {
+    const url = `https://source.unsplash.com/600x400/?${encodeURIComponent(query + ',food')}`;
+    const res = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(4000)
+    });
+    if (res.ok && res.url && res.url.includes('unsplash.com/photo')) {
+      return res.url;
+    }
+  } catch (e) {
+    console.log('Unsplash source error:', e.message);
+  }
+
+  return null; // Pas d'image trouvée
+}
+
 // POST /api/ai/chat
 router.post('/chat', authMiddleware, async (req, res) => {
   const { systemPrompt, messages } = req.body;
@@ -45,7 +108,10 @@ Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans commentaire:
   try {
     const text = await callGroq(systemPrompt, [{ content: query, isUser: true }]);
     const clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    res.json({ recipe: JSON.parse(clean) });
+    const recipe = JSON.parse(clean);
+    // Chercher une image correspondante
+    recipe.imageUrl = await fetchFoodImage(recipe.title);
+    res.json({ recipe });
   } catch (e) {
     res.status(500).json({ error: 'Erreur: ' + e.message });
   }
@@ -85,6 +151,14 @@ Les recettes doivent être VARIÉES (différents pays, styles, ingrédients prin
     const recipes = JSON.parse(match[0]);
     // Assigner des IDs uniques
     recipes.forEach((r, i) => { r.id = `gen_${Date.now()}_${i}`; });
+    // Chercher les images en parallèle (max 5 simultanées pour ne pas dépasser les quotas)
+    const chunkSize = 5;
+    for (let i = 0; i < recipes.length; i += chunkSize) {
+      const chunk = recipes.slice(i, i + chunkSize);
+      await Promise.all(chunk.map(async (recipe) => {
+        recipe.imageUrl = await fetchFoodImage(recipe.title);
+      }));
+    }
     res.json({ recipes });
   } catch (e) {
     res.status(500).json({ error: 'Erreur: ' + e.message });
