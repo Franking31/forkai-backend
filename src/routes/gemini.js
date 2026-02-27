@@ -24,31 +24,50 @@ async function callGroq(systemPrompt, messages) {
 
 // ── Recherche d'image via Unsplash ────────────
 async function fetchFoodImage(title) {
+  if (!title) return null;
   const fetch = (await import('node-fetch')).default;
-  
-  // Nettoyer le titre : enlever emojis, traduire si besoin
+
+  // Nettoyer le titre : enlever emojis et caractères spéciaux
   const query = title
-    .replace(/[\u{1F300}-\u{1FFFF}]/gu, '')
-    .replace(/[🍽️🍴]/g, '')
+    .replace(/\p{Emoji}/gu, '')
+    .replace(/[^\w\s\u00C0-\u017E]/g, ' ')
     .trim();
 
-  // 1. Essayer Unsplash (nécessite UNSPLASH_ACCESS_KEY dans les variables Render)
+  console.log(`[Image] Recherche pour: "${query}"`);
+
+  // Unsplash API avec clé
   if (process.env.UNSPLASH_ACCESS_KEY) {
     try {
-      const url = `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query + ' food dish')}&per_page=1&orientation=landscape&client_id=${process.env.UNSPLASH_ACCESS_KEY}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.results && data.results.length > 0) {
-          return data.results[0].urls.regular + '&w=600&q=80';
+      const searchQuery = encodeURIComponent(query + ' food meal dish');
+      const url = `https://api.unsplash.com/search/photos?query=${searchQuery}&per_page=3&orientation=landscape&client_id=${process.env.UNSPLASH_ACCESS_KEY}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      const data = await res.json();
+      console.log(`[Image] Unsplash status: ${res.status}, results: ${data.results?.length || 0}`);
+      if (data.results && data.results.length > 0) {
+        // Prendre la 2ème image si disponible (souvent plus pertinente)
+        const idx = data.results.length > 1 ? 1 : 0;
+        const imgUrl = data.results[idx].urls.regular;
+        console.log(`[Image] URL trouvée: ${imgUrl.substring(0, 60)}...`);
+        return imgUrl;
+      }
+      // Si pas de résultat avec le titre complet, essayer avec juste le premier mot
+      if (query.includes(' ')) {
+        const shortQuery = encodeURIComponent(query.split(' ')[0] + ' food');
+        const url2 = `https://api.unsplash.com/search/photos?query=${shortQuery}&per_page=1&orientation=landscape&client_id=${process.env.UNSPLASH_ACCESS_KEY}`;
+        const res2 = await fetch(url2, { signal: AbortSignal.timeout(5000) });
+        const data2 = await res2.json();
+        if (data2.results && data2.results.length > 0) {
+          return data2.results[0].urls.regular;
         }
       }
     } catch (e) {
-      console.log('Unsplash error:', e.message);
+      console.log('[Image] Unsplash error:', e.message);
     }
+  } else {
+    console.log('[Image] UNSPLASH_ACCESS_KEY non configurée');
   }
 
-  // 2. Fallback : Pexels (nécessite PEXELS_API_KEY)
+  // Fallback Pexels
   if (process.env.PEXELS_API_KEY) {
     try {
       const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(query + ' food')}&per_page=1&orientation=landscape`;
@@ -59,30 +78,16 @@ async function fetchFoodImage(title) {
       if (res.ok) {
         const data = await res.json();
         if (data.photos && data.photos.length > 0) {
-          return data.photos[0].src.large;
+          return data.photos[0].src.large2x || data.photos[0].src.large;
         }
       }
     } catch (e) {
-      console.log('Pexels error:', e.message);
+      console.log('[Image] Pexels error:', e.message);
     }
   }
 
-  // 3. Fallback statique : Unsplash source (pas de clé, mais deprecated)
-  try {
-    const url = `https://source.unsplash.com/600x400/?${encodeURIComponent(query + ',food')}`;
-    const res = await fetch(url, {
-      method: 'HEAD',
-      redirect: 'follow',
-      signal: AbortSignal.timeout(4000)
-    });
-    if (res.ok && res.url && res.url.includes('unsplash.com/photo')) {
-      return res.url;
-    }
-  } catch (e) {
-    console.log('Unsplash source error:', e.message);
-  }
-
-  return null; // Pas d'image trouvée
+  console.log('[Image] Aucune image trouvée, retour null');
+  return null;
 }
 
 // POST /api/ai/chat
@@ -133,6 +138,50 @@ router.get('/stats', authMiddleware, async (req, res) => {
     .eq('is_ai_generated', true);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ aiRecipesCount: count || 0 });
+});
+
+// GET /api/ai/test-image?q=pasta — Tester la recherche d'image
+router.get('/test-image', authMiddleware, async (req, res) => {
+  const query = req.query.q || 'pasta carbonara';
+  const hasUnsplash = !!process.env.UNSPLASH_ACCESS_KEY;
+  const hasPexels = !!process.env.PEXELS_API_KEY;
+  
+  console.log('[Test] Keys:', { hasUnsplash, hasPexels });
+  
+  const imageUrl = await fetchFoodImage(query);
+  res.json({
+    query,
+    imageUrl,
+    keysConfigured: { unsplash: hasUnsplash, pexels: hasPexels },
+    message: imageUrl ? '✅ Image trouvée' : '❌ Aucune image (vérifiez les clés API)'
+  });
+});
+
+// POST /api/ai/refresh-image/:recipeId — Rafraîchir l'image d'une recette
+router.post('/refresh-image/:recipeId', authMiddleware, async (req, res) => {
+  const { recipeId } = req.params;
+  const { title } = req.body;
+  if (!title) return res.status(400).json({ error: 'Titre requis' });
+
+  const imageUrl = await fetchFoodImage(title);
+  if (!imageUrl) {
+    return res.json({
+      imageUrl: null,
+      message: '❌ Aucune image trouvée. Vérifiez UNSPLASH_ACCESS_KEY sur Render.'
+    });
+  }
+
+  // Mettre à jour dans Supabase si recipeId fourni
+  if (recipeId && recipeId !== 'local') {
+    const { error } = await supabase
+      .from('recipes')
+      .update({ image_url: imageUrl })
+      .eq('id', recipeId)
+      .eq('user_id', req.userId);
+    if (error) console.log('[refresh-image] Supabase error:', error.message);
+  }
+
+  res.json({ imageUrl, message: '✅ Image trouvée' });
 });
 
 module.exports = router;
