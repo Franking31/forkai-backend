@@ -109,6 +109,13 @@ Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans commentaire:
     const text = await callGroq(systemPrompt, [{ content: query, isUser: true }]);
     const clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const recipe = JSON.parse(clean);
+    // Garantir les types corrects
+    recipe.durationMinutes = parseInt(recipe.durationMinutes) || 30;
+    recipe.servings = parseInt(recipe.servings) || servings;
+    recipe.title = recipe.title || 'Recette sans nom';
+    recipe.description = recipe.description || '';
+    recipe.ingredients = Array.isArray(recipe.ingredients) ? recipe.ingredients : [];
+    recipe.steps = Array.isArray(recipe.steps) ? recipe.steps : [];
     // Chercher une image correspondante
     recipe.imageUrl = await fetchFoodImage(recipe.title);
     res.json({ recipe });
@@ -150,7 +157,17 @@ Les recettes doivent être VARIÉES (différents pays, styles, ingrédients prin
     if (!match) throw new Error('Format JSON invalide');
     const recipes = JSON.parse(match[0]);
     // Assigner des IDs uniques
-    recipes.forEach((r, i) => { r.id = `gen_${Date.now()}_${i}`; });
+    recipes.forEach((r, i) => {
+      r.id = `gen_${Date.now()}_${i}`;
+      // Garantir les types corrects
+      r.durationMinutes = parseInt(r.durationMinutes) || 30;
+      r.servings = parseInt(r.servings) || servings;
+      r.title = r.title || 'Recette sans nom';
+      r.description = r.description || '';
+      r.ingredients = Array.isArray(r.ingredients) ? r.ingredients : [];
+      r.steps = Array.isArray(r.steps) ? r.steps : [];
+      r.imageUrl = r.imageUrl || null;
+    });
     // Chercher les images en parallèle (max 5 simultanées pour ne pas dépasser les quotas)
     const chunkSize = 5;
     for (let i = 0; i < recipes.length; i += chunkSize) {
