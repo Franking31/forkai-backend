@@ -12,13 +12,14 @@ const shoppingRoutes   = require('./routes/shopping');
 const conversationsRoutes = require('./routes/conversations');
 const ratingsRoutes    = require('./routes/ratings');
 const shareRoutes      = require('./routes/share');
+const visionRoutes     = require('./routes/vision');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(helmet());
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE'] }));
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '15mb' }));
 
 // Rate limiting
 const limiter    = rateLimit({ windowMs: 15*60*1000, max: 100 });
@@ -35,6 +36,7 @@ app.use('/api/shopping',      shoppingRoutes);
 app.use('/api/conversations',  conversationsRoutes);
 app.use('/api/ratings',        ratingsRoutes);
 app.use('/api/share',          shareRoutes);
+app.use('/api/vision',         visionRoutes);
 
 // Health
 app.get('/health', (_, res) => res.json({ status: 'ok', app: 'ForkAI Backend' }));
