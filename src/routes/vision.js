@@ -3,7 +3,7 @@ const authMiddleware = require('../middleware/auth');
 const router = express.Router();
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GEMINI_VISION_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+const GEMINI_VISION_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=AIza...';
 
 // ── Timeout helper (compatible toutes versions Node) ──
 function withTimeout(promise, ms) {
