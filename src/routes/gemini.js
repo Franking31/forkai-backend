@@ -2,9 +2,22 @@ const express = require('express');
 const authMiddleware = require('../middleware/auth');
 const supabase = require('../config/supabase');
 const router = express.Router();
+const { buildProfileContext } = require('./user_prefs_route');
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
+
+// ── Récupère le contexte utilisateur ───────
+async function getUserContext(userId) {
+  try {
+    const { data } = await supabase
+      .from('user_preferences')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+    return data ? buildProfileContext(data) : '';
+  } catch (_) { return ''; }
+}
 
 async function callGroq(systemPrompt, messages) {
   const fetch = (await import('node-fetch')).default;
@@ -96,7 +109,12 @@ router.post('/chat', authMiddleware, async (req, res) => {
   if (!messages || !Array.isArray(messages))
     return res.status(400).json({ error: 'Messages requis' });
   try {
-    const reply = await callGroq(systemPrompt || '', messages);
+    // Enrichit le prompt avec le profil utilisateur
+    const userContext = await getUserContext(req.userId);
+    const enrichedPrompt = userContext
+      ? `${systemPrompt || ''}\n\n${userContext}`
+      : (systemPrompt || '');
+    const reply = await callGroq(enrichedPrompt, messages);
     res.json({ reply });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -107,7 +125,12 @@ router.post('/chat', authMiddleware, async (req, res) => {
 router.post('/generate-recipe', authMiddleware, async (req, res) => {
   const { query, servings = 4 } = req.body;
   if (!query) return res.status(400).json({ error: 'Query requise' });
+
+  // Enrichit le prompt avec le profil utilisateur
+  const userContext = await getUserContext(req.userId);
+
   const systemPrompt = `Tu es un chef cuisinier expert. Génère une recette COMPLÈTE et DÉTAILLÉE pour ${servings} personnes.
+${userContext ? `\n${userContext}\n` : ''}
 RÈGLES IMPORTANTES :
 - Minimum 6 ingrédients avec quantités précises (ex: "250g de farine", "3 œufs", "1 cuillère à soupe d'huile d'olive")
 - Minimum 5 étapes de préparation détaillées (chaque étape explique clairement comment faire)

@@ -13,6 +13,7 @@ const conversationsRoutes = require('./routes/conversations');
 const ratingsRoutes    = require('./routes/ratings');
 const shareRoutes      = require('./routes/share');
 const visionRoutes     = require('./routes/vision');
+const userPrefsRoutes  = require('./routes/user_prefs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -37,6 +38,7 @@ app.use('/api/conversations',  conversationsRoutes);
 app.use('/api/ratings',        ratingsRoutes);
 app.use('/api/share',          shareRoutes);
 app.use('/api/vision',         visionRoutes);
+app.use('/api/prefs',          userPrefsRoutes);
 
 // Health
 app.get('/health', (_, res) => res.json({ status: 'ok', app: 'ForkAI Backend' }));
