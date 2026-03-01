@@ -2,7 +2,15 @@ const express = require('express');
 const authMiddleware = require('../middleware/auth');
 const supabase = require('../config/supabase');
 const router = express.Router();
-const { buildProfileContext } = require('./user_prefs_route');
+
+// Contexte IA utilisateur (import conditionnel pour éviter crash si fichier absent)
+let buildProfileContext = () => '';
+try {
+  const userPrefs = require('./user_prefs');
+  if (userPrefs.buildProfileContext) {
+    buildProfileContext = userPrefs.buildProfileContext;
+  }
+} catch (_) {}
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
